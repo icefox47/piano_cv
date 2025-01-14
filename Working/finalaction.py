@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 DEBUG = True
 
 mp_pose = mp.solutions.pose
+mp_drawing = mp.solutions.drawing_utils
 
 class CalibrationSystem:
     def __init__(self):
@@ -190,6 +191,40 @@ def draw_debug_info(frame, monitor, calibration):
             2
         )
 
+@dataclass
+class StairStep:
+    coordinates: Tuple[float, float]  # (x, y) coordinates
+    sound: str
+
+class StairCalibration:
+    def __init__(self):
+        self.steps = []
+        self.current_step = 0
+        self.total_steps = 6
+        # Use your existing sound files
+        self.sound_files = ['a4.mp3', 'b4.mp3', 'c4.mp3', 'd4.mp3', 'e4.mp3', 'e4.mp3']
+        
+    def capture_step(self, x, y):
+        if self.current_step < self.total_steps:
+            sound_file = self.sound_files[self.current_step]
+            self.steps.append(StairStep((x, y), sound_file))
+            self.current_step += 1
+            return True
+        return False
+
+    def is_complete(self):
+        return self.current_step >= self.total_steps
+
+def check_position_match(results, step_coords, tolerance=0.05):
+    left_ankle = results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ANKLE]
+    right_ankle = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ANKLE]
+    
+    current_x = (left_ankle.x + right_ankle.x) / 2
+    current_y = (left_ankle.y + right_ankle.y) / 2
+    
+    return (abs(current_x - step_coords[0]) < tolerance and 
+            abs(current_y - step_coords[1]) < tolerance)
+
 def main():
     # Initialize systems
     pygame.mixer.init()
@@ -197,7 +232,7 @@ def main():
     pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
     
     # Initialize camera (try different indices if 0 doesn't work)
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(2)
     if not cap.isOpened():
         logger.error("Error: Could not open camera")
         return
@@ -211,49 +246,53 @@ def main():
     logger.info("Starting calibration process...")
     logger.info("Please stand in view of the camera and remain still...")
     
-    try:
-        while True:
-            performance_monitor.frame_start()
-            
-            ret, frame = cap.read()
-            if not ret:
-                logger.error("Failed to grab frame")
-                break
-                
-            # Convert the frame to RGB
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = pose.process(rgb_frame)
-            
-            if results.pose_landmarks:
-                if not calibration.calibrated:
-                    is_calibrated = calibration.collect_calibration_frame(results)
-                    if is_calibrated:
-                        logger.info("Calibration completed! You can now move around.")
-                else:
-                    process_landmarks(results.pose_landmarks, frame, calibration)
-            
-            performance_monitor.frame_end()
-            
-            if DEBUG:
-                draw_debug_info(frame, performance_monitor, calibration)
-            
-            # Display the frame
-            cv2.imshow('Pose Detection', frame)
-            
-            # Controls
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):  # Press 'q' to quit
-                break
-            elif key == ord('r'):  # Press 'r' to recalibrate
-                logger.info("Recalibrating...")
-                calibration = CalibrationSystem()
+    stair_calibration = StairCalibration()
     
-    finally:
-        # Cleanup
-        cap.release()
-        cv2.destroyAllWindows()
-        pose.close()
-        pygame.mixer.quit()
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = pose.process(rgb_frame)
+        
+        if results.pose_landmarks:
+            # Draw the pose landmarks
+            mp_drawing.draw_landmarks(
+                frame,
+                results.pose_landmarks,
+                mp_pose.POSE_CONNECTIONS,
+                mp_drawing.DrawingSpec(color=(245,117,66), thickness=2, circle_radius=2),
+                mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=2)
+            )
+            
+            if not stair_calibration.is_complete():
+                # Calibration mode
+                left_ankle = results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ANKLE]
+                right_ankle = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ANKLE]
+                
+                x = (left_ankle.x + right_ankle.x) / 2
+                y = (left_ankle.y + right_ankle.y) / 2
+                
+                # Show calibration status
+                cv2.putText(frame, 
+                    f"Stand on step {stair_calibration.current_step + 1} and press 's'", 
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('s'):
+                    stair_calibration.capture_step(x, y)
+                    print(f"Step {stair_calibration.current_step} captured!")
+            else:
+                # Detection mode
+                for step in stair_calibration.steps:
+                    if check_position_match(results, step.coordinates):
+                        sound_manager.play_sound(step.sound)
+        
+        cv2.imshow('Frame', frame)
+        
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
 if __name__ == "__main__":
     main()
