@@ -93,26 +93,23 @@ class SoundManager:
     def __init__(self):
         self._sound_cache = {}
         self._last_played_sound = None
-        self._last_play_time = 0
-        self.MIN_INTERVAL = 0.1  # Minimum seconds between sounds
-
+        self._current_step_sound = None
+        
     def preload_sounds(self, sound_files):
         for sound_file in sound_files:
             try:
                 self._sound_cache[sound_file] = pygame.mixer.Sound(sound_file)
             except Exception as e:
                 logger.error(f"Error loading sound {sound_file}: {e}")
-
+        
     def play_sound(self, sound_file):
-        current_time = time.time()
-        if (sound_file != self._last_played_sound and 
-            current_time - self._last_play_time >= self.MIN_INTERVAL):
+        # Only play if it's a different step than current
+        if sound_file != self._current_step_sound:
             if sound_file not in self._sound_cache:
-                self.preload_sounds([sound_file])
+                self._sound_cache[sound_file] = pygame.mixer.Sound(sound_file)
             
             self._sound_cache[sound_file].play()
-            self._last_played_sound = sound_file
-            self._last_play_time = current_time
+            self._current_step_sound = sound_file
 
 class PerformanceMonitor:
     def __init__(self, window_size=100):
@@ -201,8 +198,8 @@ class StairCalibration:
         self.steps = []
         self.current_step = 0
         self.total_steps = 6
-        # Use your existing sound files
-        self.sound_files = ['a4.mp3', 'b4.mp3', 'c4.mp3', 'd4.mp3', 'e4.mp3', 'e4.mp3']
+        # Added f4.mp3 as the sixth sound
+        self.sound_files = ['a4.mp3', 'b4.mp3', 'c4.mp3', 'd4.mp3', 'e4.mp3', 'f4.mp3']
         
     def capture_step(self, x, y):
         if self.current_step < self.total_steps:
