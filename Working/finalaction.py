@@ -229,7 +229,7 @@ def main():
     pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
     
     # Initialize camera (try different indices if 0 doesn't work)
-    cap = cv2.VideoCapture(2)
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         logger.error("Error: Could not open camera")
         return

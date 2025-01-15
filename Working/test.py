@@ -189,23 +189,33 @@ def draw_debug_info(frame, monitor, calibration):
 
 @dataclass
 class StairStep:
-    coordinates: Tuple[float, float]  # (x, y) coordinates
+    coordinates: List[Tuple[float, float]]  # List of (x, y) coordinates
     sound: str
 
 class StairCalibration:
     def __init__(self):
         self.steps = []
         self.current_step = 0
-        self.total_steps = 6
-        # Added f4.mp3 as the sixth sound
+        self.total_steps = 6  # Six stairs
+        self.current_point_count = 0
+        self.points_per_step = 5  # 5 points per step
+        self.temp_points = []
         self.sound_files = ['a4.mp3', 'b4.mp3', 'c4.mp3', 'd4.mp3', 'e4.mp3', 'f4.mp3']
         
     def capture_step(self, x, y):
         if self.current_step < self.total_steps:
-            sound_file = self.sound_files[self.current_step]
-            self.steps.append(StairStep((x, y), sound_file))
-            self.current_step += 1
-            return True
+            self.temp_points.append((x, y))
+            self.current_point_count += 1
+            
+            if self.current_point_count >= self.points_per_step:
+                sound_file = self.sound_files[self.current_step]
+                self.steps.append(StairStep(self.temp_points, sound_file))
+                self.current_step += 1
+                # Reset for next step
+                self.current_point_count = 0
+                self.temp_points = []
+                return True
+            return False
         return False
 
     def is_complete(self):
@@ -218,8 +228,12 @@ def check_position_match(results, step_coords, tolerance=0.05):
     current_x = (left_ankle.x + right_ankle.x) / 2
     current_y = (left_ankle.y + right_ankle.y) / 2
     
-    return (abs(current_x - step_coords[0]) < tolerance and 
-            abs(current_y - step_coords[1]) < tolerance)
+    # Check against all calibration points
+    for point_x, point_y in step_coords:
+        if (abs(current_x - point_x) < tolerance and 
+            abs(current_y - point_y) < tolerance):
+            return True
+    return False
 
 def main():
     # Initialize systems
@@ -253,7 +267,6 @@ def main():
         results = pose.process(rgb_frame)
         
         if results.pose_landmarks:
-            # Draw the pose landmarks
             mp_drawing.draw_landmarks(
                 frame,
                 results.pose_landmarks,
@@ -263,33 +276,53 @@ def main():
             )
             
             if not stair_calibration.is_complete():
-                # Calibration mode
                 left_ankle = results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_ANKLE]
                 right_ankle = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_ANKLE]
                 
                 x = (left_ankle.x + right_ankle.x) / 2
                 y = (left_ankle.y + right_ankle.y) / 2
                 
-                # Show calibration status
+                # Show calibration instructions
+                point_instructions = [
+                    "Center of step",
+                    "Front edge",
+                    "Back edge",
+                    "Left side",
+                    "Right side"
+                ]
+                
+                current_instruction = point_instructions[stair_calibration.current_point_count]
                 cv2.putText(frame, 
-                    f"Stand on step {stair_calibration.current_step + 1} and press 's'", 
+                    f"Stair {stair_calibration.current_step + 1}/6, Point {stair_calibration.current_point_count + 1}/5: {current_instruction}", 
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                
+                # Draw current calibration points
+                height, width, _ = frame.shape
+                for px, py in stair_calibration.temp_points:
+                    cv2.circle(frame, 
+                             (int(px * width), int(py * height)), 
+                             5, (0, 255, 0), -1)
                 
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('s'):
-                    stair_calibration.capture_step(x, y)
-                    print(f"Step {stair_calibration.current_step} captured!")
+                    if stair_calibration.capture_step(x, y):
+                        print(f"Stair {stair_calibration.current_step}/6 fully calibrated!")
+                    else:
+                        print(f"Captured point {stair_calibration.current_point_count}/5: {current_instruction}")
             else:
                 # Detection mode
                 for i, step in enumerate(stair_calibration.steps):
                     if check_position_match(results, step.coordinates):
-                        sound_manager.play_sound(step.sound, i)  # Pass step number
+                        sound_manager.play_sound(step.sound, i)
                         break
         
         cv2.imshow('Frame', frame)
         
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
+
+    cap.release()
+    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
